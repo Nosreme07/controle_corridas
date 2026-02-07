@@ -1,15 +1,9 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import 'package:uuid/uuid.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-// NOVOS IMPORTS PARA O PDF
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-
-import '../models/transaction.dart';
-import '../components/transaction_form.dart';
+import 'package:intl/intl.dart';
+import 'login_screen.dart';
+import 'finance_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,40 +13,20 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<Transaction> _transactions = [];
-  DateTime _selectedDate = DateTime.now();
-  
-  // Variáveis para o Controle de Km
+  final User? user = FirebaseAuth.instance.currentUser;
+
+  // Variáveis de Estado
   double? _startKm;
   double? _endKm;
+  double _kmRodados = 0.0;
 
   @override
   void initState() {
     super.initState();
-    _loadTransactions();
     _loadDailyMileage();
   }
 
-  // --- PERSISTÊNCIA ---
-  Future<void> _saveTransactions() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String data = jsonEncode(_transactions.map((tr) => tr.toJson()).toList());
-    await prefs.setString('transactions_data', data);
-    setState(() {}); 
-  }
-
-  Future<void> _loadTransactions() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String? data = prefs.getString('transactions_data');
-    if (data != null) {
-      final List<dynamic> decodedList = jsonDecode(data);
-      setState(() {
-        _transactions = decodedList.map((item) => Transaction.fromJson(item)).toList();
-        _transactions.sort((a, b) => b.date.compareTo(a.date));
-      });
-    }
-  }
-
+  // --- CARREGAR DADOS ---
   String get _todayKey => DateFormat('yyyyMMdd').format(DateTime.now());
 
   Future<void> _loadDailyMileage() async {
@@ -60,226 +34,343 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _startKm = prefs.getDouble('km_start_$_todayKey');
       _endKm = prefs.getDouble('km_end_$_todayKey');
+      _calculateRodados();
     });
   }
 
-  Future<void> _setMileage(bool isStart, double value) async {
-    final prefs = await SharedPreferences.getInstance();
-    final type = isStart ? 'km_start' : 'km_end';
-    await prefs.setDouble('${type}_$_todayKey', value);
-    _loadDailyMileage();
+  void _calculateRodados() {
+    if (_startKm != null && _endKm != null) {
+      _kmRodados = _endKm! - _startKm!;
+    } else {
+      _kmRodados = 0.0;
+    }
   }
 
-  // --- LÓGICA DO PDF (NOVO) ---
-  Future<void> _generatePdf() async {
-    final pdf = pw.Document();
-    
-    // Filtra dados do mês
-    final monthTransactions = _monthlyTransactions;
-    final totalIncome = monthTransactions.where((t) => t.type == TransactionType.income).fold(0.0, (s, t) => s + t.value);
-    final totalExpense = monthTransactions.where((t) => t.type == TransactionType.expense).fold(0.0, (s, t) => s + t.value);
-    final balance = totalIncome - totalExpense;
-    final monthName = DateFormat('MMMM y', 'pt_BR').format(_selectedDate).toUpperCase();
+  // --- DIÁLOGOS DE AÇÃO ---
 
-    // Carrega uma fonte que aceita acentos (Opcional, mas recomendado)
-    final font = await PdfGoogleFonts.openSansRegular();
-    final fontBold = await PdfGoogleFonts.openSansBold();
-
-    pdf.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a4,
-        build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              // Cabeçalho
-              pw.Header(
-                level: 0,
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('Relatório de Corridas', style: pw.TextStyle(font: fontBold, fontSize: 20)),
-                    pw.Text(monthName, style: pw.TextStyle(font: font, fontSize: 16)),
-                  ],
-                ),
-              ),
-              
-              pw.SizedBox(height: 20),
-
-              // Resumo Financeiro
-              pw.Container(
-                padding: const pw.EdgeInsets.all(10),
-                decoration: pw.BoxDecoration(border: pw.Border.all()),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                  children: [
-                    pw.Column(children: [
-                      pw.Text('Entradas', style: pw.TextStyle(font: font)),
-                      pw.Text('R\$ ${totalIncome.toStringAsFixed(2)}', style: pw.TextStyle(font: fontBold, color: PdfColors.green)),
-                    ]),
-                    pw.Column(children: [
-                      pw.Text('Saídas', style: pw.TextStyle(font: font)),
-                      pw.Text('R\$ ${totalExpense.toStringAsFixed(2)}', style: pw.TextStyle(font: fontBold, color: PdfColors.red)),
-                    ]),
-                    pw.Column(children: [
-                      pw.Text('Saldo', style: pw.TextStyle(font: font)),
-                      pw.Text('R\$ ${balance.toStringAsFixed(2)}', style: pw.TextStyle(font: fontBold, fontSize: 14)),
-                    ]),
-                  ],
-                ),
-              ),
-
-              pw.SizedBox(height: 20),
-
-              // Tabela de Dados
-              pw.Table.fromTextArray(
-                context: context,
-                border: null,
-                headerStyle: pw.TextStyle(font: fontBold),
-                cellStyle: pw.TextStyle(font: font, fontSize: 10),
-                headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
-                headers: ['Data', 'Descrição', 'Tipo', 'Valor'],
-                data: monthTransactions.map((tr) {
-                  return [
-                    DateFormat('dd/MM').format(tr.date),
-                    tr.title,
-                    tr.type == TransactionType.income ? 'Entrada' : 'Saída',
-                    'R\$ ${tr.value.toStringAsFixed(2)}',
-                  ];
-                }).toList(),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-
-    // Abre a pré-visualização nativa do celular (com botão de compartilhar)
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
-      name: 'Relatorio_$monthName',
-    );
-  }
-
-  // --- HELPERS E UI ---
-
-  void _showMileageDialog(bool isStart) {
+  // 1. DIÁLOGO: INICIAR O DIA (Só pede Km Inicial)
+  void _openStartDayDialog() {
     final controller = TextEditingController();
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(isStart ? 'Km Inicial' : 'Km Final'),
+        title: const Row(
+          children: [
+            Icon(Icons.play_circle_fill, color: Colors.green),
+            SizedBox(width: 10),
+            Text("Iniciar Dia"),
+          ],
+        ),
         content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Digite a Km')),
+          controller: controller,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Km Inicial (Odômetro)',
+            border: OutlineInputBorder(),
+            hintText: 'Ex: 50000',
+          ),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
-            onPressed: () {
-              final val = double.tryParse(controller.text);
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            onPressed: () async {
+              final val = double.tryParse(controller.text.replaceAll(',', '.'));
               if (val != null) {
-                _setMileage(isStart, val);
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setDouble('km_start_$_todayKey', val);
+
+                // Se já tiver um final antigo (de teste), apaga para evitar erro de cálculo
+                if (_endKm != null && _endKm! < val) {
+                  await prefs.remove('km_end_$_todayKey');
+                }
+
+                _loadDailyMileage(); // Atualiza a tela (O botão vai mudar de cor sozinho!)
+                if (!mounted) return;
                 Navigator.of(ctx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Bom trabalho! Dia iniciado.")),
+                );
               }
             },
-            child: const Text('Salvar'),
+            child: const Text('INICIAR', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
-  List<Transaction> get _monthlyTransactions {
-    return _transactions.where((tr) {
-      return tr.date.month == _selectedDate.month && 
-             tr.date.year == _selectedDate.year;
-    }).toList();
-  }
-
-  double get _monthlyBalance => _calculateBalance(_monthlyTransactions);
-
-  List<Transaction> get _todayTransactions {
-    final now = DateTime.now();
-    return _transactions.where((tr) => tr.date.day == now.day && tr.date.month == now.month && tr.date.year == now.year).toList();
-  }
-
-  double get _todayProfit => _calculateBalance(_todayTransactions);
-
-  double _calculateBalance(List<Transaction> trs) {
-    double income = trs.where((t) => t.type == TransactionType.income).fold(0.0, (s, t) => s + t.value);
-    double expense = trs.where((t) => t.type == TransactionType.expense).fold(0.0, (s, t) => s + t.value);
-    return income - expense;
-  }
-
-  void _addOrEditTransaction(String? id, String title, double value, DateTime date, TransactionType type) {
-    if (id == null) {
-      setState(() => _transactions.add(Transaction(id: const Uuid().v4(), title: title, value: value, date: date, type: type)));
-    } else {
-      final index = _transactions.indexWhere((tr) => tr.id == id);
-      if (index >= 0) {
-        setState(() => _transactions[index] = Transaction(id: id, title: title, value: value, date: date, type: type));
-      }
-    }
-    setState(() => _transactions.sort((a, b) => b.date.compareTo(a.date)));
-    _saveTransactions();
-    Navigator.of(context).pop();
-  }
-
-  void _deleteTransaction(String id) {
-    setState(() => _transactions.removeWhere((tr) => tr.id == id));
-    _saveTransactions();
-  }
-
-  void _openTransactionFormModal(BuildContext context, {Transaction? transaction}) {
-    showModalBottomSheet(
+  // 2. DIÁLOGO: FINALIZAR O DIA (Só pede Km Final)
+  void _openEndDayDialog() {
+    final controller = TextEditingController(
+      text: _endKm != null ? _endKm!.toInt().toString() : '',
+    );
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: TransactionForm(_addOrEditTransaction, existingTransaction: transaction),
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.stop_circle, color: Colors.red),
+            SizedBox(width: 10),
+            Text("Finalizar Dia"),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              "Km Inicial: ${_startKm?.toInt() ?? '---'}",
+              style: const TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 15),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Km Final (Odômetro)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              final val = double.tryParse(controller.text.replaceAll(',', '.'));
+              if (val != null) {
+                if (_startKm != null && val < _startKm!) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Erro: Km Final menor que Inicial!"),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setDouble('km_end_$_todayKey', val);
+
+                _loadDailyMileage();
+                if (!mounted) return;
+                Navigator.of(ctx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      "Dia encerrado! Rodou: ${_kmRodados.toStringAsFixed(1)} Km",
+                    ),
+                  ),
+                );
+              }
+            },
+            child: const Text(
+              'FINALIZAR',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  void _previousMonth() => setState(() => _selectedDate = DateTime(_selectedDate.year, _selectedDate.month - 1));
-  void _nextMonth() => setState(() => _selectedDate = DateTime(_selectedDate.year, _selectedDate.month + 1));
+  // Função para limpar dados (Resetar dia - Opcional, útil para testes)
+  void _resetDay() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('km_start_$_todayKey');
+    await prefs.remove('km_end_$_todayKey');
+    _loadDailyMileage();
+  }
 
-  // WIDGET CARD KM (CÓDIGO ANTERIOR)
-  Widget _buildMileageCard() {
-    double kmRodados = 0;
-    double rendimentoPorKm = 0;
-    if (_startKm != null && _endKm != null) {
-      kmRodados = _endKm! - _startKm!;
-      if (kmRodados > 0) rendimentoPorKm = _todayProfit / kmRodados;
-    }
+  // --- NAVEGAÇÃO ---
+  void _logout() async {
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+    );
+  }
 
+  void _navegarPara(Widget tela) {
+    Navigator.push(context, MaterialPageRoute(builder: (context) => tela));
+  }
+
+  // --- WIDGETS ---
+  Widget _buildDailySummaryCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.black87, Colors.grey[900]!],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 10,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "RESUMO DO DIA",
+                style: TextStyle(
+                  color: Colors.amber,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              // Botãozinho discreto para resetar o dia se precisar corrigir o inicial
+              if (_startKm != null)
+                InkWell(
+                  onTap: () {
+                    // Confirmação para resetar
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text("Reiniciar dia?"),
+                        content: const Text(
+                          "Isso apagará a Km Inicial e Final de hoje.",
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text("Não"),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _resetDay();
+                            },
+                            child: const Text("Sim"),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                  child: const Icon(
+                    Icons.refresh,
+                    color: Colors.white24,
+                    size: 20,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 15),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Inicial",
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  Text(
+                    _startKm != null ? "${_startKm!.toInt()} Km" : "---",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const Icon(Icons.arrow_forward, color: Colors.white24),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  const Text(
+                    "Final",
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  Text(
+                    _endKm != null ? "${_endKm!.toInt()} Km" : "---",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const Divider(color: Colors.white10, height: 30),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Você rodou hoje:",
+                style: TextStyle(color: Colors.white),
+              ),
+              Text(
+                "${_kmRodados.toStringAsFixed(1)} Km",
+                style: const TextStyle(
+                  color: Colors.amber,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuCard({
+    required String titulo,
+    required IconData icone,
+    required Color cor,
+    required VoidCallback onTap,
+  }) {
     return Card(
-      color: Colors.grey[900],
-      margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(15),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      color: Colors.white,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(15),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text("RESUMO DE HOJE", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                GestureDetector(onTap: () => _showMileageDialog(true), child: Column(children: [const Text('Km Inicial', style: TextStyle(color: Colors.white70)), Text(_startKm?.toInt().toString() ?? '---', style: const TextStyle(color: Colors.white, fontSize: 18))])),
-                const Icon(Icons.arrow_forward, color: Colors.white24),
-                GestureDetector(onTap: () => _showMileageDialog(false), child: Column(children: [const Text('Km Final', style: TextStyle(color: Colors.white70)), Text(_endKm?.toInt().toString() ?? '---', style: const TextStyle(color: Colors.white, fontSize: 18))])),
-              ],
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cor.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icone, size: 30, color: cor),
             ),
-            const Divider(color: Colors.white24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                 Column(children: [const Text('Rodou', style: TextStyle(color: Colors.white70)), Text('${kmRodados.toInt()} km', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]),
-                 Column(children: [const Text('Lucro', style: TextStyle(color: Colors.white70)), Text('R\$ ${_todayProfit.toStringAsFixed(2)}', style: TextStyle(color: _todayProfit >= 0 ? Colors.green : Colors.red, fontWeight: FontWeight.bold))]),
-                 Column(children: [const Text('R\$/Km', style: TextStyle(color: Colors.white70)), Text('R\$ ${rendimentoPorKm.toStringAsFixed(2)}', style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold))]),
-              ],
-            )
+            const SizedBox(height: 10),
+            Text(
+              titulo,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
           ],
         ),
       ),
@@ -288,88 +379,116 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final displayedTransactions = _monthlyTransactions;
+    // LÓGICA DO BOTÃO DINÂMICO
+    // Se não tem StartKm -> Botão Verde (Iniciar)
+    // Se TEM StartKm -> Botão Vermelho (Finalizar)
+    final bool isDiaIniciado = _startKm != null;
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: const Text('Controle de Corridas'),
+        title: const Text(
+          'DOMEX',
+          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1),
+        ),
+        centerTitle: true,
+        backgroundColor: Colors.amber,
         actions: [
-          // BOTÃO DE PDF AQUI
           IconButton(
-            icon: const Icon(Icons.picture_as_pdf),
-            tooltip: 'Gerar Relatório',
-            onPressed: displayedTransactions.isEmpty 
-              ? null // Desabilita se não tiver dados
-              : _generatePdf, 
+            icon: const Icon(Icons.exit_to_app, color: Colors.black),
+            onPressed: _logout,
           ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _openTransactionFormModal(context),
-          )
         ],
       ),
-      body: Column(
-        children: [
-          _buildMileageCard(),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 5),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16), onPressed: _previousMonth),
-                Text(DateFormat('MMMM y', 'pt_BR').format(_selectedDate).toUpperCase(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                IconButton(icon: const Icon(Icons.arrow_forward_ios, size: 16), onPressed: _nextMonth),
-              ],
-            ),
+
+      // --- BOTÃO FLUTUANTE QUE MUDA DE COR ---
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: isDiaIniciado ? _openEndDayDialog : _openStartDayDialog,
+        backgroundColor: isDiaIniciado ? Colors.red : Colors.green,
+        icon: Icon(
+          isDiaIniciado ? Icons.stop : Icons.play_arrow,
+          color: Colors.white,
+        ),
+        label: Text(
+          isDiaIniciado ? "FINALIZAR DIA" : "INICIAR DIA",
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
           ),
-          Container(
-            width: double.infinity,
-            margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-            padding: const EdgeInsets.all(15),
-            decoration: BoxDecoration(color: Colors.amber, borderRadius: BorderRadius.circular(10)),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Saldo do Mês:', style: TextStyle(fontWeight: FontWeight.bold)),
-                Text('R\$ ${_monthlyBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-              ],
+        ),
+      ),
+
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Olá, ${user?.email?.split('@')[0] ?? 'Motorista'}",
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: displayedTransactions.length,
-              itemBuilder: (ctx, index) {
-                final tr = displayedTransactions[index];
-                return Dismissible(
-                  key: ValueKey(tr.id),
-                  background: Container(color: Colors.red, alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20), child: const Icon(Icons.delete, color: Colors.white)),
-                  onDismissed: (_) => _deleteTransaction(tr.id),
-                  child: Card(
-                    margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 15),
-                    child: InkWell(
-                      onTap: () => _openTransactionFormModal(context, transaction: tr),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          radius: 20,
-                          backgroundColor: tr.type == TransactionType.income ? Colors.green[100] : Colors.red[100],
-                          child: Icon(tr.type == TransactionType.income ? Icons.arrow_upward : Icons.arrow_downward, color: tr.type == TransactionType.income ? Colors.green : Colors.red, size: 16),
-                        ),
-                        title: Text(tr.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text(DateFormat('dd/MM HH:mm').format(tr.date)),
-                        trailing: Text('R\$ ${tr.value.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.bold, color: tr.type == TransactionType.income ? Colors.green[800] : Colors.red[800])),
-                      ),
-                    ),
+            Text(
+              isDiaIniciado ? "Turno em andamento..." : "Pronto para começar?",
+              style: const TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 20),
+
+            _buildDailySummaryCard(),
+
+            const SizedBox(height: 25),
+            const Text(
+              "MENU RÁPIDO",
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              crossAxisSpacing: 15,
+              mainAxisSpacing: 15,
+              childAspectRatio: 1.3,
+              children: [
+                // Removi o botão de "Ajustar Km" do grid pois agora o FAB faz tudo.
+                // Mas deixei aqui caso queira um atalho para Finanças.
+                _buildMenuCard(
+                  titulo: "Minhas\nFinanças",
+                  icone: Icons.attach_money,
+                  cor: Colors.amber[800]!,
+                  onTap: () => _navegarPara(const FinanceScreen()),
+                ),
+                _buildMenuCard(
+                  titulo: "Relatórios\n& PDF",
+                  icone: Icons.picture_as_pdf,
+                  cor: Colors.purple,
+                  onTap: () => _navegarPara(const FinanceScreen()),
+                ),
+                _buildMenuCard(
+                  titulo: "Histórico\nCorridas",
+                  icone: Icons.history,
+                  cor: Colors.blue,
+                  onTap: () => ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text("Em breve!"))),
+                ),
+                _buildMenuCard(
+                  titulo: "Perfil",
+                  icone: Icons.person,
+                  cor: Colors.grey,
+                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Perfil do Motorista")),
                   ),
-                );
-              },
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.black,
-        child: const Icon(Icons.add, color: Colors.amber),
-        onPressed: () => _openTransactionFormModal(context),
+            const SizedBox(height: 80),
+          ],
+        ),
       ),
     );
   }

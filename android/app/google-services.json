@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "755741762456",
+    "project_id": "domex-9718a",
+    "storage_bucket": "domex-9718a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:755741762456:android:e0a77990fd0c63156741ed",
+        "android_client_info": {
+          "package_name": "com.example.controle_99"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBvW3-bviPQxLQxvfLwCJzQdTQvp-fDg-E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

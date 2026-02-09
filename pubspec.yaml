@@ -17,10 +17,15 @@ dependencies:
   shared_preferences: ^2.5.4
   pdf: ^3.11.3
   printing: ^5.14.2
-  # Dependências do Firebase para o Plano Blaze
+  
+  # --- Dependências do Firebase ---
   firebase_core: ^4.4.0
   firebase_auth: ^6.1.4
   cloud_firestore: ^6.1.2
+
+  # --- Novas Dependências (Foto e Links) ---
+  image_picker: ^1.0.7  # Para tirar foto e pegar da galeria
+  url_launcher: ^6.2.5  # Para abrir o link da CNH Digital
 
 dev_dependencies:
   flutter_test:
@@ -34,8 +39,7 @@ flutter:
   assets:
     - assets/images/
 
-# --- CONFIGURAÇÃO DOS ÍCONES ---
-# Certifique-se de que o arquivo domex_logo.png existe na pasta assets/images/
+# --- CONFIGURAÇÃO DOS ÍCONES DO APP ---
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true

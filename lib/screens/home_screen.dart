@@ -1,9 +1,15 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Importação necessária
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+
+// <--- TELAS
 import 'login_screen.dart';
 import 'finance_screen.dart';
+import 'profile_screen.dart';
+import 'reports_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,29 +19,40 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final User? user = FirebaseAuth.instance.currentUser;
+  User? user = FirebaseAuth.instance.currentUser;
 
   // Variáveis de Estado
   double? _startKm;
   double? _endKm;
   double _kmRodados = 0.0;
+  String? _profileImageBase64;
 
   @override
   void initState() {
     super.initState();
-    _loadDailyMileage();
+    _loadAllData();
   }
 
-  // --- CARREGAR DADOS ---
   String get _todayKey => DateFormat('yyyyMMdd').format(DateTime.now());
 
-  Future<void> _loadDailyMileage() async {
+  // Função auxiliar para pegar o início do dia atual
+  DateTime _getStartOfDay() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  Future<void> _loadAllData() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _startKm = prefs.getDouble('km_start_$_todayKey');
-      _endKm = prefs.getDouble('km_end_$_todayKey');
-      _calculateRodados();
-    });
+    user = FirebaseAuth.instance.currentUser;
+
+    if (mounted) {
+      setState(() {
+        _startKm = prefs.getDouble('km_start_$_todayKey');
+        _endKm = prefs.getDouble('km_end_$_todayKey');
+        _profileImageBase64 = prefs.getString('profile_image_base64');
+        _calculateRodados();
+      });
+    }
   }
 
   void _calculateRodados() {
@@ -46,9 +63,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- DIÁLOGOS DE AÇÃO ---
-
-  // 1. DIÁLOGO: INICIAR O DIA (Só pede Km Inicial)
+  // --- DIÁLOGOS (INICIAR/FINALIZAR) ---
+  // (Mantive os diálogos iguais, apenas removendo comentários para encurtar visualização)
   void _openStartDayDialog() {
     final controller = TextEditingController();
     showDialog(
@@ -66,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
           keyboardType: TextInputType.number,
           autofocus: true,
           decoration: const InputDecoration(
-            labelText: 'Km Inicial (Odômetro)',
+            labelText: 'Km Inicial',
             border: OutlineInputBorder(),
             hintText: 'Ex: 50000',
           ),
@@ -83,18 +99,10 @@ class _HomeScreenState extends State<HomeScreen> {
               if (val != null) {
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setDouble('km_start_$_todayKey', val);
-
-                // Se já tiver um final antigo (de teste), apaga para evitar erro de cálculo
-                if (_endKm != null && _endKm! < val) {
-                  await prefs.remove('km_end_$_todayKey');
-                }
-
-                _loadDailyMileage(); // Atualiza a tela (O botão vai mudar de cor sozinho!)
+                await prefs.remove('km_end_$_todayKey');
+                _loadAllData();
                 if (!mounted) return;
                 Navigator.of(ctx).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Bom trabalho! Dia iniciado.")),
-                );
               }
             },
             child: const Text('INICIAR', style: TextStyle(color: Colors.white)),
@@ -104,7 +112,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 2. DIÁLOGO: FINALIZAR O DIA (Só pede Km Final)
   void _openEndDayDialog() {
     final controller = TextEditingController(
       text: _endKm != null ? _endKm!.toInt().toString() : '',
@@ -122,17 +129,14 @@ class _HomeScreenState extends State<HomeScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              "Km Inicial: ${_startKm?.toInt() ?? '---'}",
-              style: const TextStyle(color: Colors.grey),
-            ),
+            Text("Km Inicial: ${_startKm?.toInt() ?? '---'}"),
             const SizedBox(height: 15),
             TextField(
               controller: controller,
               keyboardType: TextInputType.number,
               autofocus: true,
               decoration: const InputDecoration(
-                labelText: 'Km Final (Odômetro)',
+                labelText: 'Km Final',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -151,46 +155,45 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (_startKm != null && val < _startKm!) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text("Erro: Km Final menor que Inicial!"),
-                      backgroundColor: Colors.red,
-                    ),
+                        content: Text("Erro: Km Final menor que Inicial!")),
                   );
                   return;
                 }
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setDouble('km_end_$_todayKey', val);
-
-                _loadDailyMileage();
+                _loadAllData();
                 if (!mounted) return;
                 Navigator.of(ctx).pop();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      "Dia encerrado! Rodou: ${_kmRodados.toStringAsFixed(1)} Km",
-                    ),
-                  ),
+                  const SnackBar(
+                      content: Text("Dia finalizado! Bom descanso.")),
                 );
               }
             },
-            child: const Text(
-              'FINALIZAR',
-              style: TextStyle(color: Colors.white),
-            ),
+            child: const Text('FINALIZAR', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
-  // Função para limpar dados (Resetar dia - Opcional, útil para testes)
+  void _reopenDay() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('km_end_$_todayKey');
+    _loadAllData();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Dia reaberto! Pode continuar rodando.")),
+    );
+  }
+
   void _resetDay() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('km_start_$_todayKey');
     await prefs.remove('km_end_$_todayKey');
-    _loadDailyMileage();
+    _loadAllData();
   }
 
-  // --- NAVEGAÇÃO ---
   void _logout() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
@@ -200,146 +203,193 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navegarPara(Widget tela) {
-    Navigator.push(context, MaterialPageRoute(builder: (context) => tela));
+    // Quando volta da tela de finanças, recarregamos os dados locais (embora o Stream cuide do financeiro)
+    Navigator.push(context, MaterialPageRoute(builder: (context) => tela))
+        .then((_) => _loadAllData());
   }
 
-  // --- WIDGETS ---
+  // --- WIDGET DO CARD ESCURO (COM STREAM DO FIRESTORE) ---
   Widget _buildDailySummaryCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.black87, Colors.grey[900]!],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 10,
-            offset: Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                "RESUMO DO DIA",
-                style: TextStyle(
-                  color: Colors.amber,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
-                ),
+    final currencyFormat =
+        NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+    final startOfDay = _getStartOfDay();
+
+    return StreamBuilder<QuerySnapshot>(
+      // Escuta as movimentações DO DIA ATUAL
+      stream: FirebaseFirestore.instance
+          .collection('financas')
+          .where('userId', isEqualTo: user?.uid)
+          .where('data',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+          .snapshots(),
+      builder: (context, snapshot) {
+        double ganhosHoje = 0.00;
+
+        if (snapshot.hasData) {
+          for (var doc in snapshot.data!.docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            final double valor = (data['valor'] ?? 0.0) as double;
+            if (data['tipo'] == 'Entrada') {
+              ganhosHoje += valor;
+            } else {
+              ganhosHoje -= valor;
+            }
+          }
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black45,
+                blurRadius: 10,
+                offset: Offset(0, 5),
               ),
-              // Botãozinho discreto para resetar o dia se precisar corrigir o inicial
-              if (_startKm != null)
-                InkWell(
-                  onTap: () {
-                    // Confirmação para resetar
-                    showDialog(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text("Reiniciar dia?"),
-                        content: const Text(
-                          "Isso apagará a Km Inicial e Final de hoje.",
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text("Não"),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // --- Título do Card ---
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "RESUMO DO DIA",
+                    style: TextStyle(
+                      color: Colors.amber,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  if (_startKm != null)
+                    InkWell(
+                      onTap: () {
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text("Reiniciar dia?"),
+                            content: const Text("Isso apagará a Km de hoje."),
+                            actions: [
+                              TextButton(
+                                  onPressed: () => Navigator.pop(ctx),
+                                  child: const Text("Não")),
+                              TextButton(
+                                  onPressed: () {
+                                    Navigator.pop(ctx);
+                                    _resetDay();
+                                  },
+                                  child: const Text("Sim")),
+                            ],
                           ),
-                          TextButton(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _resetDay();
-                            },
-                            child: const Text("Sim"),
-                          ),
-                        ],
+                        );
+                      },
+                      child: const Icon(Icons.refresh,
+                          color: Colors.white24, size: 20),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // --- Linha dos KMs ---
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("Inicial",
+                          style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      Text(
+                        _startKm != null ? "${_startKm!.toInt()} Km" : "---",
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold),
                       ),
-                    );
-                  },
-                  child: const Icon(
-                    Icons.refresh,
-                    color: Colors.white24,
-                    size: 20,
+                    ],
                   ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 15),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "Inicial",
-                    style: TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                  Text(
-                    _startKm != null ? "${_startKm!.toInt()} Km" : "---",
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  const Icon(Icons.arrow_forward, color: Colors.white24),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text("Final",
+                          style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      Text(
+                        _endKm != null ? "${_endKm!.toInt()} Km" : "---",
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              const Icon(Icons.arrow_forward, color: Colors.white24),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+
+              const SizedBox(height: 20),
+
+              // --- Linha do Financeiro (ATUALIZADA PELO STREAM) ---
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    "Final",
-                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("Ganhos estimados (Hoje)",
+                          style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      Text(
+                        currencyFormat.format(ganhosHoje),
+                        style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ],
                   ),
+                  Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                          color: Colors.greenAccent.withOpacity(0.2),
+                          shape: BoxShape.circle),
+                      child: const Icon(Icons.attach_money,
+                          color: Colors.greenAccent, size: 24)),
+                ],
+              ),
+
+              const Divider(color: Colors.white10, height: 30),
+
+              // --- Total Rodado ---
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Você rodou hoje:",
+                      style: TextStyle(color: Colors.white)),
                   Text(
-                    _endKm != null ? "${_endKm!.toInt()} Km" : "---",
+                    "${_kmRodados.toStringAsFixed(1)} Km",
                     style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                        color: Colors.amber,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
             ],
           ),
-          const Divider(color: Colors.white10, height: 30),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                "Você rodou hoje:",
-                style: TextStyle(color: Colors.white),
-              ),
-              Text(
-                "${_kmRodados.toStringAsFixed(1)} Km",
-                style: const TextStyle(
-                  color: Colors.amber,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
+  // --- WIDGET DO MENU ---
   Widget _buildMenuCard({
     required String titulo,
-    required IconData icone,
+    IconData? icone,
+    Widget? customIcon,
     required Color cor,
     required VoidCallback onTap,
   }) {
@@ -354,12 +404,15 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(12),
+              padding:
+                  customIcon != null ? EdgeInsets.zero : const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: cor.withValues(alpha: 0.1),
+                color: customIcon != null
+                    ? Colors.transparent
+                    : cor.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icone, size: 30, color: cor),
+              child: customIcon ?? Icon(icone, size: 30, color: cor),
             ),
             const SizedBox(height: 10),
             Text(
@@ -379,73 +432,117 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // LÓGICA DO BOTÃO DINÂMICO
-    // Se não tem StartKm -> Botão Verde (Iniciar)
-    // Se TEM StartKm -> Botão Vermelho (Finalizar)
-    final bool isDiaIniciado = _startKm != null;
+    bool isDiaNaoIniciado = _startKm == null;
+    bool isDiaEmAndamento = _startKm != null && _endKm == null;
+    bool isDiaFinalizado = _startKm != null && _endKm != null;
+
+    String nomeExibicao = "Motorista";
+    if (user != null) {
+      if (user!.displayName != null && user!.displayName!.isNotEmpty) {
+        nomeExibicao = user!.displayName!;
+      } else if (user!.email != null) {
+        nomeExibicao = user!.email!.split('@')[0];
+      }
+    }
+
+    ImageProvider? profileImageProvider;
+    if (_profileImageBase64 != null) {
+      profileImageProvider = MemoryImage(base64Decode(_profileImageBase64!));
+    }
+
+    Color fabColor = Colors.green;
+    IconData fabIcon = Icons.play_arrow;
+    String fabLabel = "INICIAR DIA";
+    VoidCallback fabAction = _openStartDayDialog;
+
+    if (isDiaEmAndamento) {
+      fabColor = Colors.red;
+      fabIcon = Icons.stop;
+      fabLabel = "FINALIZAR DIA";
+      fabAction = _openEndDayDialog;
+    } else if (isDiaFinalizado) {
+      fabColor = Colors.orange[800]!;
+      fabIcon = Icons.replay;
+      fabLabel = "REABRIR DIA";
+      fabAction = _reopenDay;
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: const Text(
-          'DOMEX',
-          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1),
-        ),
+        title: const Text('DOMEX',
+            style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
         centerTitle: true,
         backgroundColor: Colors.amber,
         actions: [
           IconButton(
-            icon: const Icon(Icons.exit_to_app, color: Colors.black),
-            onPressed: _logout,
-          ),
+              icon: const Icon(Icons.exit_to_app, color: Colors.black),
+              onPressed: _logout),
         ],
       ),
-
-      // --- BOTÃO FLUTUANTE QUE MUDA DE COR ---
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: isDiaIniciado ? _openEndDayDialog : _openStartDayDialog,
-        backgroundColor: isDiaIniciado ? Colors.red : Colors.green,
-        icon: Icon(
-          isDiaIniciado ? Icons.stop : Icons.play_arrow,
-          color: Colors.white,
-        ),
-        label: Text(
-          isDiaIniciado ? "FINALIZAR DIA" : "INICIAR DIA",
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        onPressed: fabAction,
+        backgroundColor: fabColor,
+        icon: Icon(fabIcon, color: Colors.white),
+        label: Text(fabLabel,
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold)),
       ),
-
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              "Olá, ${user?.email?.split('@')[0] ?? 'Motorista'}",
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: Colors.grey[300],
+                  backgroundImage: profileImageProvider,
+                  child: profileImageProvider == null
+                      ? const Icon(Icons.person, color: Colors.grey, size: 30)
+                      : null,
+                ),
+                const SizedBox(width: 15),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Olá, ${nomeExibicao.length > 15 ? '${nomeExibicao.substring(0, 15)}...' : nomeExibicao}",
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    if (isDiaEmAndamento)
+                      Text("Turno ativo 🟢",
+                          style: TextStyle(
+                              color: Colors.green[700],
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500))
+                    else if (isDiaFinalizado)
+                      const Text("Turno finalizado 🏁",
+                          style: TextStyle(
+                              color: Colors.orange,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500))
+                    else
+                      Text("Offline 🔴",
+                          style: TextStyle(
+                              color: Colors.red[300],
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              ],
             ),
-            Text(
-              isDiaIniciado ? "Turno em andamento..." : "Pronto para começar?",
-              style: const TextStyle(color: Colors.grey),
-            ),
-            const SizedBox(height: 20),
-
-            _buildDailySummaryCard(),
-
             const SizedBox(height: 25),
-            const Text(
-              "MENU RÁPIDO",
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
-            ),
+            _buildDailySummaryCard(),
+            const SizedBox(height: 25),
+            const Text("MENU RÁPIDO",
+                style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey)),
             const SizedBox(height: 10),
-
             GridView.count(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -454,35 +551,38 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSpacing: 15,
               childAspectRatio: 1.3,
               children: [
-                // Removi o botão de "Ajustar Km" do grid pois agora o FAB faz tudo.
-                // Mas deixei aqui caso queira um atalho para Finanças.
                 _buildMenuCard(
-                  titulo: "Minhas\nFinanças",
+                  titulo: "Movimentação",
                   icone: Icons.attach_money,
                   cor: Colors.amber[800]!,
                   onTap: () => _navegarPara(const FinanceScreen()),
                 ),
                 _buildMenuCard(
-                  titulo: "Relatórios\n& PDF",
-                  icone: Icons.picture_as_pdf,
+                  titulo: "Relatórios",
+                  icone: Icons.bar_chart,
                   cor: Colors.purple,
-                  onTap: () => _navegarPara(const FinanceScreen()),
+                  onTap: () => _navegarPara(const ReportsScreen()),
                 ),
                 _buildMenuCard(
-                  titulo: "Histórico\nCorridas",
-                  icone: Icons.history,
-                  cor: Colors.blue,
-                  onTap: () => ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(const SnackBar(content: Text("Em breve!"))),
-                ),
-                _buildMenuCard(
-                  titulo: "Perfil",
-                  icone: Icons.person,
+                  titulo: "Meu Perfil",
                   cor: Colors.grey,
-                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Perfil do Motorista")),
-                  ),
+                  customIcon: profileImageProvider != null
+                      ? CircleAvatar(
+                          radius: 25,
+                          backgroundImage: profileImageProvider,
+                          backgroundColor: Colors.transparent,
+                        )
+                      : null,
+                  icone: Icons.person,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const ProfileScreen()),
+                    ).then((_) {
+                      _loadAllData();
+                    });
+                  },
                 ),
               ],
             ),

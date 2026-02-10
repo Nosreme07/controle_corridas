@@ -2,10 +2,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'login_screen.dart';
+import 'premium_screen.dart'; 
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -19,53 +21,74 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final ImagePicker _picker = ImagePicker();
 
-  // Controladores de Texto
+  // Controladores
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _vehicleModelController = TextEditingController();
   final TextEditingController _vehiclePlateController = TextEditingController();
   final TextEditingController _pixKeyController = TextEditingController();
 
-  // Variáveis de Imagem (Base64 String)
   String? _profileImageBase64;
   String? _qrCodeImageBase64;
-
   bool _isLoading = false;
+  
+  // Status Premium
+  bool isPremium = false;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
+    _checkPremiumStatus();
+  }
+
+  // --- LÓGICA DE VERIFICAÇÃO PREMIUM ---
+  Future<void> _checkPremiumStatus() async {
+    if (user != null) {
+      // 1. REGRA MÁGICA: Seu email é sempre Premium
+      if (user!.email == 'emerson.fernandesantos@gmail.com') {
+        if (mounted) setState(() => isPremium = true);
+        return; 
+      }
+
+      // 2. Verifica no Banco de Dados para outros usuários
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
+        if (doc.exists && doc.data() != null) {
+          if (mounted) {
+            setState(() {
+              isPremium = doc.data()!['isPremium'] == true;
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint("Erro ao checar premium: $e");
+      }
+    }
   }
 
   Future<void> _loadUserData() async {
-    // 1. Dados do Firebase Auth
     if (user != null) {
       _nameController.text = user!.displayName ?? '';
       _emailController.text = user!.email ?? '';
     }
 
-    // 2. Dados Locais (SharedPreferences)
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _vehicleModelController.text = prefs.getString('vehicle_model') ?? '';
       _vehiclePlateController.text = prefs.getString('vehicle_plate') ?? '';
       _pixKeyController.text = prefs.getString('pix_key') ?? '';
-      
-      // Carrega as imagens
       _profileImageBase64 = prefs.getString('profile_image_base64');
       _qrCodeImageBase64 = prefs.getString('qr_code_base64');
     });
   }
 
-  // --- FUNÇÃO PARA PEGAR IMAGEM E COMPRIMIR ---
   Future<void> _pickImage(bool isProfile) async {
     try {
-      // imageQuality: 20 garante resolução baixa (poucos dados)
       final XFile? image = await _picker.pickImage(
         source: ImageSource.gallery, 
         imageQuality: 20, 
-        maxWidth: 400, // Limita largura
+        maxWidth: 400, 
       );
       
       if (image != null) {
@@ -81,17 +104,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         });
       }
     } catch (e) {
-      debugPrint("Erro ao pegar imagem: $e");
+      debugPrint("Erro: $e");
     }
   }
 
-  // --- FUNÇÃO PARA ABRIR CNH ---
   Future<void> _openCNH() async {
-    // Tenta abrir direto na loja de apps (Android)
     final Uri url = Uri.parse("market://details?id=br.gov.serpro.cnhe");
-    // Fallback para web se não abrir a loja
     final Uri webUrl = Uri.parse("https://play.google.com/store/apps/details?id=br.gov.serpro.cnhe");
-    
     try {
       if (await canLaunchUrl(url)) {
         await launchUrl(url);
@@ -99,9 +118,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         await launchUrl(webUrl, mode: LaunchMode.externalApplication);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Não foi possível abrir a loja de apps.")),
-      );
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erro ao abrir loja.")));
+    }
+  }
+
+  Future<void> _contactDeveloper() async {
+    // Link do WhatsApp
+    final Uri url = Uri.parse("https://wa.me/5581999999999?text=Olá, tenho interesse no Domex Premium.");
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+       if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Não foi possível abrir o WhatsApp")));
     }
   }
 
@@ -110,38 +135,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Atualiza Auth
       if (user != null) {
         await user!.updateDisplayName(_nameController.text.trim());
       }
 
-      // Salva no SharedPreferences (Simulando Banco Local rápido)
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('vehicle_model', _vehicleModelController.text.trim());
       await prefs.setString('vehicle_plate', _vehiclePlateController.text.trim().toUpperCase());
       await prefs.setString('pix_key', _pixKeyController.text.trim());
       
-      if (_profileImageBase64 != null) {
-        await prefs.setString('profile_image_base64', _profileImageBase64!);
-      }
-      if (_qrCodeImageBase64 != null) {
-        await prefs.setString('qr_code_base64', _qrCodeImageBase64!);
-      }
+      if (_profileImageBase64 != null) await prefs.setString('profile_image_base64', _profileImageBase64!);
+      if (_qrCodeImageBase64 != null) await prefs.setString('qr_code_base64', _qrCodeImageBase64!);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Dados salvos com sucesso!'), backgroundColor: Colors.green),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
+  // --- LOGOUT COM LIMPEZA DE DADOS LOCAIS ---
   void _logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear(); // Limpa foto e dados locais para evitar conflito entre contas
+    
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -189,7 +210,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              const Text("Toque para alterar foto", style: TextStyle(color: Colors.grey, fontSize: 12)),
+              
+              // --- SEÇÃO PREMIUM ---
+              _buildPremiumSection(),
+              
               const SizedBox(height: 20),
 
               // Campos Básicos
@@ -209,7 +233,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const Text("Veículo & Pagamentos", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black54)),
               const SizedBox(height: 15),
 
-              // Veículo
               Row(
                 children: [
                   Expanded(
@@ -230,14 +253,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 15),
 
-              // PIX KEY
               TextFormField(
                 controller: _pixKeyController,
                 decoration: const InputDecoration(labelText: 'Chave Pix (CPF/Email/Tel)', prefixIcon: Icon(Icons.pix, color: Colors.green), border: OutlineInputBorder()),
               ),
               const SizedBox(height: 15),
 
-              // QR CODE PIX
               GestureDetector(
                 onTap: () => _pickImage(false),
                 child: Container(
@@ -265,7 +286,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               const SizedBox(height: 30),
 
-              // BOTÃO CNH DIGITAL
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -279,7 +299,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               const SizedBox(height: 20),
 
-              // BOTÃO SALVAR
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -298,10 +317,113 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 icon: const Icon(Icons.logout, color: Colors.red),
                 label: const Text("Sair da Conta", style: TextStyle(color: Colors.red)),
               ),
+
+              // --- CRÉDITOS DO DESENVOLVEDOR ---
+              const SizedBox(height: 40),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(Icons.code, size: 16, color: Colors.grey),
+                  SizedBox(width: 8),
+                  Text(
+                    "Desenvolvido\npor Emerson Fernandes",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
             ],
           ),
         ),
       ),
     );
+  }
+
+  // WIDGET DO CARD PREMIUM
+  Widget _buildPremiumSection() {
+    if (isPremium) {
+      // VISÃO DO USUÁRIO PREMIUM
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [Colors.amber, Colors.orange]),
+          borderRadius: BorderRadius.circular(15),
+          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 5)],
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.verified, color: Colors.white, size: 40),
+            const SizedBox(width: 15),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("MEMBRO PREMIUM", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+                  Text("Acesso vitalício liberado 👑", style: TextStyle(color: Colors.white, fontSize: 14)),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.support_agent, color: Colors.white),
+              onPressed: _contactDeveloper,
+              tooltip: "Falar com Suporte",
+            )
+          ],
+        ),
+      );
+    } else {
+      // VISÃO DO USUÁRIO GRÁTIS
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(color: Colors.amber, width: 1),
+        ),
+        child: Column(
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.star, color: Colors.amber),
+                SizedBox(width: 10),
+                Text("Seja Premium", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 18)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              "Desbloqueie relatórios completos, monitor automático e exportação de PDF.",
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 15),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+                    onPressed: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (context) => const PremiumScreen())).then((_) => _checkPremiumStatus());
+                    },
+                    child: const Text("COMPRAR - R\$ 19,99", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                  onPressed: _contactDeveloper, 
+                  icon: const Icon(Icons.chat, color: Colors.green), 
+                  tooltip: "Falar com Desenvolvedor",
+                )
+              ],
+            )
+          ],
+        ),
+      );
+    }
   }
 }

@@ -23,9 +23,11 @@ dependencies:
   firebase_auth: ^6.1.4
   cloud_firestore: ^6.1.2
 
-  # --- Novas Dependências (Foto e Links) ---
+  # --- Dependências de Funcionalidades ---
   image_picker: ^1.0.7  # Para tirar foto e pegar da galeria
-  url_launcher: ^6.2.5  # Para abrir o link da CNH Digital
+  url_launcher: ^6.2.5  # Para abrir o link da CNH Digital e WhatsApp
+  flutter_notification_listener: ^1.1.0 # Para ler notificações do sistema
+  flutter_local_notifications: ^17.0.0 # <--- ADICIONADO: Para enviar o alerta de resultado
 
 dev_dependencies:
   flutter_test:
@@ -43,7 +45,12 @@ flutter:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/images/logo3.png"
+  image_path: "assets/images/logo_icone.png"
   min_sdk_android: 21
-  adaptive_icon_background: "#FFC107"
-  adaptive_icon_foreground: "assets/images/domex_logo.png"
+  adaptive_icon_background: "#FFE5E770"
+  adaptive_icon_foreground: "assets/images/logo_icone.png"
+  web:
+    generate: true
+    image_path: "assets/images/logo_icone.png"
+    background_color: "#FFE5E770"
+    theme_color: "#FFE5E770"

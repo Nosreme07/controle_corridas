@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:firebase_core/firebase_core.dart'; // ADICIONADO
-import 'package:firebase_auth/firebase_auth.dart'; // ADICIONADO
-import 'firebase_options.dart'; // ADICIONADO (arquivo que você gerou)
-import 'screens/home_screen.dart';
-import './screens/login_screen.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'firebase_options.dart';
+import 'package:domex/screens/home_screen.dart';
+import 'package:domex/screens/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

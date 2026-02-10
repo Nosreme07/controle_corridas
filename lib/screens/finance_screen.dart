@@ -143,7 +143,10 @@ class _FinanceScreenState extends State<FinanceScreen> {
       _tipoSelecionado = data['tipo'];
       _categoriaSelecionada = data['categoria'];
       _detalhesController.text = data['detalhes'] ?? '';
-      _valorController.text = (data['valor'] ?? 0.0).toStringAsFixed(2);
+      
+      // Conversão segura também aqui ao abrir para edição
+      double val = (data['valor'] ?? 0).toDouble();
+      _valorController.text = val.toStringAsFixed(2);
     } else {
       _idParaEditar = null;
       _tipoSelecionado = 'Entrada';
@@ -347,7 +350,8 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 
                 for (var doc in docs) {
                   final data = doc.data() as Map<String, dynamic>;
-                  final valor = (data['valor'] ?? 0.0) as double;
+                  // CORREÇÃO AQUI: Convertendo para double de forma segura
+                  final valor = (data['valor'] ?? 0).toDouble();
                   if (data['tipo'] == 'Entrada') {
                     totalEntrada += valor;
                   } else {
@@ -388,7 +392,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                           ),
                           const SizedBox(height: 20),
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               // Entradas
                               Column(
@@ -433,7 +437,8 @@ class _FinanceScreenState extends State<FinanceScreen> {
                                 final doc = docs[index];
                                 final dados = doc.data() as Map<String, dynamic>;
                                 final bool isEntrada = dados['tipo'] == 'Entrada';
-                                final double valor = dados['valor'] ?? 0.0;
+                                // CORREÇÃO AQUI TAMBÉM
+                                final double valor = (dados['valor'] ?? 0).toDouble();
                                 final String categoria = dados['categoria'] ?? 'Geral';
                                 final String detalhes = dados['detalhes'] ?? '';
 

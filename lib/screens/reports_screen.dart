@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'premium_screen.dart'; // Importe a tela de venda
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -16,27 +17,47 @@ class ReportsScreen extends StatefulWidget {
 class _ReportsScreenState extends State<ReportsScreen> {
   final User? user = FirebaseAuth.instance.currentUser;
   
-  // --- SIMULAÇÃO DE STATUS PREMIUM ---
-  // Mude para TRUE para testar a visão de quem pagou.
-  // Mude para FALSE para testar o bloqueio de 1 mês.
+  // Status Premium real (buscado do banco)
   bool isPremium = false; 
+  bool _isLoadingStatus = true; 
 
   String _filtroSelecionado = 'Dia'; 
   DateTime _dataSelecionada = DateTime.now(); 
 
-  // Define o limite grátis (30 dias atrás a partir de hoje)
+  @override
+  void initState() {
+    super.initState();
+    _checkPremiumStatus();
+  }
+
+  Future<void> _checkPremiumStatus() async {
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
+        if (doc.exists && doc.data() != null) {
+          if (mounted) {
+            setState(() {
+              isPremium = doc.data()!['isPremium'] == true;
+              _isLoadingStatus = false;
+            });
+          }
+        } else {
+           if (mounted) setState(() => _isLoadingStatus = false);
+        }
+      } catch (e) {
+        debugPrint("Erro ao verificar premium: $e");
+        if (mounted) setState(() => _isLoadingStatus = false);
+      }
+    }
+  }
+
   DateTime get _dataLimiteGratis => DateTime.now().subtract(const Duration(days: 30));
 
-  // Verifica se o usuário pode ver a data selecionada
   bool _verificarAcesso(DateTimeRange intervalo) {
-    if (isPremium) return true; // Premium vê tudo
-    
-    // Se o início do intervalo for ANTES do limite de 30 dias, bloqueia
-    // Ex: Selecionou mês passado (start < limite) -> Bloqueia
+    if (isPremium) return true; 
     return intervalo.start.isAfter(_dataLimiteGratis);
   }
 
-  // --- LÓGICA DE DATAS ---
   DateTimeRange _getIntervaloDatas() {
     final base = DateTime(_dataSelecionada.year, _dataSelecionada.month, _dataSelecionada.day);
     
@@ -57,11 +78,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
   }
 
-  // --- FUNÇÃO DE GERAR PDF ---
   Future<void> _gerarPDF() async {
     final intervalo = _getIntervaloDatas();
     
-    // BLOQUEIO NO PDF TAMBÉM
     if (!_verificarAcesso(intervalo)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -129,11 +148,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final data = docs.map((doc) {
       final d = doc.data() as Map<String, dynamic>;
       final date = (d['data'] as Timestamp).toDate();
+      
+      // --- CORREÇÃO DE SEGURANÇA (INT -> DOUBLE) ---
+      final val = (d['valor'] ?? 0).toDouble();
+
       return [
         DateFormat('HH:mm').format(date),
         d['categoria'] ?? 'Geral',
         d['tipo'],
-        fmt.format(d['valor'] ?? 0),
+        fmt.format(val),
       ];
     }).toList();
 
@@ -160,7 +183,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final d = doc.data() as Map<String, dynamic>;
       if (d['tipo'] == 'Entrada') {
         final cat = d['categoria'] ?? 'Outros';
-        final val = (d['valor'] ?? 0.0) as double;
+        
+        // --- CORREÇÃO DE SEGURANÇA (INT -> DOUBLE) ---
+        final val = (d['valor'] ?? 0).toDouble();
+        
         totais[cat] = (totais[cat] ?? 0) + val;
         totalGeral += val;
       }
@@ -193,7 +219,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: _dataSelecionada,
-      firstDate: DateTime(2020), // Permite navegar para trás para ver o bloqueio
+      firstDate: DateTime(2020), 
       lastDate: DateTime(2030),
       locale: const Locale('pt', 'BR'), 
       builder: (context, child) {
@@ -225,10 +251,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingStatus) {
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     final intervalo = _getIntervaloDatas();
     final currencyFormat = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
-    
-    // VERIFICA SE O USUÁRIO TEM ACESSO
     final bool acessoPermitido = _verificarAcesso(intervalo);
 
     return Scaffold(
@@ -240,7 +268,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         elevation: 0,
         centerTitle: true,
         actions: [
-          // Ícone de PDF muda de cor se estiver bloqueado
           IconButton(
             icon: Icon(
               acessoPermitido ? Icons.picture_as_pdf : Icons.lock, 
@@ -253,7 +280,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
       ),
       body: Column(
         children: [
-          // --- BARRA DE FILTROS ---
           Container(
             color: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 10),
@@ -267,7 +293,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ),
           ),
 
-          // --- SELETOR DE DATA ---
           GestureDetector(
             onTap: _escolherData,
             child: Container(
@@ -292,10 +317,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ),
           ),
 
-          // --- CONTEÚDO (STREAM OU BLOQUEIO) ---
           Expanded(
             child: !acessoPermitido 
-              ? _buildPremiumLock() // SE TIVER BLOQUEADO, MOSTRA ISSO
+              ? _buildPremiumLock() 
               : StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('financas')
@@ -309,12 +333,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       return const Center(child: CircularProgressIndicator());
                     }
                     if (snapshot.hasError) {
+                      // Se o erro for de índice, ele mostra aqui
                       return Center(child: Text("Erro: ${snapshot.error}")); 
                     }
 
                     final docs = snapshot.data?.docs ?? [];
 
-                    // --- CÁLCULOS GERAIS ---
                     double totalFaturamento = 0.0;
                     int qtdCorridas = 0;
                     
@@ -323,7 +347,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
                     for (var doc in docs) {
                       final data = doc.data() as Map<String, dynamic>;
-                      final double valor = (data['valor'] ?? 0.0) as double;
+                      
+                      // --- CORREÇÃO DE SEGURANÇA (INT -> DOUBLE) ---
+                      // Se for null vira 0, se for int vira double, se for double mantém.
+                      final double valor = (data['valor'] ?? 0).toDouble();
+                      
                       final String categoria = data['categoria'] ?? 'Outros';
                       
                       if (data['tipo'] == 'Entrada') {
@@ -337,7 +365,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
                     return Column(
                       children: [
-                        // --- CARDS DE RESUMO ---
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Row(
@@ -376,7 +403,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           ),
                         ),
 
-                        // --- LISTA ---
                         Expanded(
                           child: docs.isEmpty 
                             ? const Center(child: Text("Sem dados neste período.", style: TextStyle(color: Colors.grey)))
@@ -388,7 +414,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                     itemBuilder: (context, index) {
                                       final data = docs[index].data() as Map<String, dynamic>;
                                       final bool isEntrada = data['tipo'] == 'Entrada';
-                                      final double valor = data['valor'] ?? 0.0;
+                                      
+                                      // --- CORREÇÃO DE SEGURANÇA ---
+                                      final double valor = (data['valor'] ?? 0).toDouble();
+                                      
                                       final date = (data['data'] as Timestamp).toDate();
                                       
                                       return Card(
@@ -475,7 +504,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  // --- TELA DE BLOQUEIO PREMIUM ---
   Widget _buildPremiumLock() {
     return Center(
       child: Padding(
@@ -506,8 +534,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
             const SizedBox(height: 30),
             ElevatedButton(
               onPressed: () {
-                // Aqui você levaria para a tela de pagamento
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Tela de Pagamento em breve!")));
+                Navigator.push(
+                  context, 
+                  MaterialPageRoute(builder: (context) => const PremiumScreen())
+                ).then((_) => _checkPremiumStatus());
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.black,

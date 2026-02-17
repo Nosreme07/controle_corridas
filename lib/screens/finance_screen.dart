@@ -20,10 +20,10 @@ class _FinanceScreenState extends State<FinanceScreen> {
   String? _idParaEditar;
   bool _isLoading = false;
 
-  // --- NOVO: Variável de Filtro ---
-  String _filtroPeriodo = 'Hoje'; // Padrão: Hoje
+  // Variável de Filtro
+  String _filtroPeriodo = 'Hoje'; // Opções: Hoje, Semana, Mês
 
-  // Listas
+  // Listas de Categorias
   final List<String> _appsEntrada = [
     'Uber',
     '99',
@@ -41,29 +41,30 @@ class _FinanceScreenState extends State<FinanceScreen> {
     'Outro',
   ];
 
-  // --- LÓGICA DE DATAS PARA O FILTRO ---
+  // --- LÓGICA DE DATAS (CORRIGIDA) ---
   DateTime _getDataInicio() {
     final now = DateTime.now();
+    
+    // Zera o horário para 00:00:00 para pegar o dia inteiro
+    final hojeZerado = DateTime(now.year, now.month, now.day);
+
     if (_filtroPeriodo == 'Hoje') {
-      return DateTime(now.year, now.month, now.day); // Começo do dia (00:00)
+      return hojeZerado;
     } else if (_filtroPeriodo == 'Semana') {
-      // Pega o último domingo ou segunda-feira. Vamos usar os últimos 7 dias ou inicio da semana
-      return now.subtract(
-        Duration(days: now.weekday - 1),
-      ); // Início da semana (Segunda)
+      // Pega a segunda-feira da semana atual
+      final startOfWeek = hojeZerado.subtract(Duration(days: now.weekday - 1));
+      return startOfWeek;
     } else {
-      // Mês
-      return DateTime(now.year, now.month, 1); // Dia 1 do mês atual
+      // Dia 1 do mês atual
+      return DateTime(now.year, now.month, 1);
     }
   }
 
-  // --- FUNÇÕES DE BANCO DE DADOS (Salvar/Excluir) ---
+  // --- FUNÇÕES DE BANCO DE DADOS ---
   Future<void> _salvarMovimentacao() async {
-    if (_valorController.text.isEmpty || _categoriaSelecionada == null) {
+    if (_valorController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Preencha o valor e escolha uma categoria.'),
-        ),
+        const SnackBar(content: Text('Preencha o valor.')),
       );
       return;
     }
@@ -78,9 +79,10 @@ class _FinanceScreenState extends State<FinanceScreen> {
         final dados = {
           'userId': user.uid,
           'tipo': _tipoSelecionado,
-          'categoria': _categoriaSelecionada,
+          'categoria': _categoriaSelecionada ?? 'Geral', // Garante categoria
           'detalhes': _detalhesController.text,
           'valor': valor,
+          // Se for edição, NÃO muda a data. Se for novo, usa data do servidor.
           if (_idParaEditar == null) 'data': FieldValue.serverTimestamp(),
         };
 
@@ -94,7 +96,12 @@ class _FinanceScreenState extends State<FinanceScreen> {
         }
 
         if (!mounted) return;
-        Navigator.of(context).pop();
+        Navigator.of(context).pop(); // Fecha o modal
+        
+        // Limpa campos para próxima vez
+        _detalhesController.clear();
+        _valorController.clear();
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(_idParaEditar == null ? 'Salvo!' : 'Atualizado!'),
@@ -122,12 +129,13 @@ class _FinanceScreenState extends State<FinanceScreen> {
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
-      // erro
+      debugPrint("Erro ao excluir: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  // --- FORMULÁRIO (MODAL) ---
   void _abrirFormulario(BuildContext context, {DocumentSnapshot? doc}) {
     if (doc != null) {
       final data = doc.data() as Map<String, dynamic>;
@@ -135,7 +143,10 @@ class _FinanceScreenState extends State<FinanceScreen> {
       _tipoSelecionado = data['tipo'];
       _categoriaSelecionada = data['categoria'];
       _detalhesController.text = data['detalhes'] ?? '';
-      _valorController.text = (data['valor'] ?? 0.0).toStringAsFixed(2);
+      
+      // Conversão segura também aqui ao abrir para edição
+      double val = (data['valor'] ?? 0).toDouble();
+      _valorController.text = val.toStringAsFixed(2);
     } else {
       _idParaEditar = null;
       _tipoSelecionado = 'Entrada';
@@ -213,18 +224,16 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   const SizedBox(height: 15),
                   DropdownButtonFormField<String>(
                     value: _categoriaSelecionada,
+                    hint: const Text("Selecione a Categoria"),
                     decoration: const InputDecoration(
                       labelText: 'Categoria',
                       border: OutlineInputBorder(),
                     ),
-                    items:
-                        (_tipoSelecionado == 'Entrada'
-                                ? _appsEntrada
-                                : _gastosSaida)
-                            .map(
-                              (e) => DropdownMenuItem(value: e, child: Text(e)),
-                            )
-                            .toList(),
+                    items: (_tipoSelecionado == 'Entrada'
+                            ? _appsEntrada
+                            : _gastosSaida)
+                        .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                        .toList(),
                     onChanged: (v) =>
                         setModalState(() => _categoriaSelecionada = v),
                   ),
@@ -232,18 +241,17 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   TextField(
                     controller: _detalhesController,
                     decoration: const InputDecoration(
-                      labelText: 'Detalhes',
+                      labelText: 'Detalhes (Opcional)',
                       border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 15),
                   TextField(
                     controller: _valorController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(
                       labelText: 'Valor',
+                      prefixText: 'R\$ ',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -276,13 +284,13 @@ class _FinanceScreenState extends State<FinanceScreen> {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final dataInicio = _getDataInicio(); // Pega a data baseada no filtro
+    final dataInicio = _getDataInicio();
 
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
         title: const Text(
-          'Finanças',
+          'Movimentação', // Nome ajustado conforme pedido anterior
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.amber,
@@ -303,7 +311,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
           // --- BARRA DE FILTROS ---
           Container(
             color: Colors.amber,
-            padding: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.only(bottom: 15),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -314,16 +322,14 @@ class _FinanceScreenState extends State<FinanceScreen> {
             ),
           ),
 
-          // --- STREAM BUILDER ---
+          // --- LISTA COM ATUALIZAÇÃO AUTOMÁTICA (StreamBuilder) ---
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
+              // O StreamBuilder é quem garante que os dados atualizem sozinhos
               stream: FirebaseFirestore.instance
                   .collection('financas')
                   .where('userId', isEqualTo: user?.uid)
-                  .where(
-                    'data',
-                    isGreaterThanOrEqualTo: Timestamp.fromDate(dataInicio),
-                  ) // FILTRO DE DATA
+                  .where('data', isGreaterThanOrEqualTo: Timestamp.fromDate(dataInicio))
                   .orderBy('data', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {
@@ -331,30 +337,26 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                // Se der erro de índice, mostre no console
                 if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text(
-                        "Carregando filtros...\n(Se não carregar, verifique o console para o link do Índice)\nErro: ${snapshot.error}",
-                      ),
-                    ),
-                  );
+                   // Se aparecer erro de índice, ele avisa aqui
+                  return Center(child: Text("Erro ao carregar: ${snapshot.error}"));
                 }
 
                 final docs = snapshot.data?.docs ?? [];
 
-                // Cálculo do Saldo (Baseado só nos itens filtrados)
+                // Recalcula o saldo a cada atualização
                 double totalEntrada = 0.0;
                 double totalSaida = 0.0;
+                
                 for (var doc in docs) {
                   final data = doc.data() as Map<String, dynamic>;
-                  final valor = (data['valor'] ?? 0.0) as double;
-                  if (data['tipo'] == 'Entrada')
+                  // CORREÇÃO AQUI: Convertendo para double de forma segura
+                  final valor = (data['valor'] ?? 0).toDouble();
+                  if (data['tipo'] == 'Entrada') {
                     totalEntrada += valor;
-                  else
+                  } else {
                     totalSaida += valor;
+                  }
                 }
                 final saldo = totalEntrada - totalSaida;
 
@@ -390,38 +392,26 @@ class _FinanceScreenState extends State<FinanceScreen> {
                           ),
                           const SizedBox(height: 20),
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
+                              // Entradas
                               Column(
                                 children: [
-                                  const Icon(
-                                    Icons.arrow_upward,
-                                    color: Colors.green,
-                                  ),
+                                  const Icon(Icons.arrow_upward, color: Colors.green),
                                   Text(
                                     "R\$ ${totalEntrada.toStringAsFixed(2)}",
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
                                   ),
                                 ],
                               ),
-                              Container(
-                                height: 30,
-                                width: 1,
-                                color: Colors.black12,
-                              ),
+                              Container(height: 30, width: 1, color: Colors.black12),
+                              // Saídas
                               Column(
                                 children: [
-                                  const Icon(
-                                    Icons.arrow_downward,
-                                    color: Colors.red,
-                                  ),
+                                  const Icon(Icons.arrow_downward, color: Colors.red),
                                   Text(
                                     "R\$ ${totalSaida.toStringAsFixed(2)}",
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
                                   ),
                                 ],
                               ),
@@ -431,81 +421,57 @@ class _FinanceScreenState extends State<FinanceScreen> {
                       ),
                     ),
 
-                    // LISTA
+                    // LISTA DE ITENS
                     Expanded(
                       child: docs.isEmpty
                           ? Center(
                               child: Text(
-                                "Sem lançamentos $_filtroPeriodo.",
+                                "Nenhum lançamento em $_filtroPeriodo.",
                                 style: const TextStyle(color: Colors.grey),
                               ),
                             )
                           : ListView.builder(
-                              padding: const EdgeInsets.only(
-                                top: 10,
-                                bottom: 80,
-                              ),
+                              padding: const EdgeInsets.only(top: 10, bottom: 80),
                               itemCount: docs.length,
                               itemBuilder: (context, index) {
                                 final doc = docs[index];
-                                final dados =
-                                    doc.data() as Map<String, dynamic>;
-                                final bool isEntrada =
-                                    dados['tipo'] == 'Entrada';
-                                final double valor = dados['valor'] ?? 0.0;
-                                final String categoria =
-                                    dados['categoria'] ?? 'Geral';
+                                final dados = doc.data() as Map<String, dynamic>;
+                                final bool isEntrada = dados['tipo'] == 'Entrada';
+                                // CORREÇÃO AQUI TAMBÉM
+                                final double valor = (dados['valor'] ?? 0).toDouble();
+                                final String categoria = dados['categoria'] ?? 'Geral';
+                                final String detalhes = dados['detalhes'] ?? '';
 
-                                // Data Formatada
+                                // Formata Data
                                 String dataStr = '';
                                 if (dados['data'] != null) {
-                                  final dt = (dados['data'] as Timestamp)
-                                      .toDate();
-                                  dataStr = DateFormat(
-                                    'dd/MM HH:mm',
-                                  ).format(dt);
+                                  final dt = (dados['data'] as Timestamp).toDate();
+                                  dataStr = DateFormat('dd/MM HH:mm').format(dt);
                                 }
 
                                 return Card(
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 15,
-                                    vertical: 5,
-                                  ),
+                                  margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
                                   child: InkWell(
-                                    onTap: () =>
-                                        _abrirFormulario(context, doc: doc),
+                                    onTap: () => _abrirFormulario(context, doc: doc),
                                     child: ListTile(
                                       leading: CircleAvatar(
-                                        backgroundColor: isEntrada
-                                            ? Colors.green[50]
-                                            : Colors.red[50],
+                                        backgroundColor: isEntrada ? Colors.green[50] : Colors.red[50],
                                         child: Icon(
-                                          isEntrada
-                                              ? Icons.arrow_upward
-                                              : Icons.arrow_downward,
-                                          color: isEntrada
-                                              ? Colors.green
-                                              : Colors.red,
+                                          isEntrada ? Icons.arrow_upward : Icons.arrow_downward,
+                                          color: isEntrada ? Colors.green : Colors.red,
                                           size: 20,
                                         ),
                                       ),
                                       title: Text(
                                         categoria,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
+                                        style: const TextStyle(fontWeight: FontWeight.bold),
                                       ),
-                                      subtitle: Text(
-                                        dataStr,
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
+                                      subtitle: Text("$dataStr ${detalhes.isNotEmpty ? '- $detalhes' : ''}"),
                                       trailing: Text(
                                         'R\$ ${valor.toStringAsFixed(2)}',
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
-                                          color: isEntrada
-                                              ? Colors.green[700]
-                                              : Colors.red[700],
+                                          color: isEntrada ? Colors.green[700] : Colors.red[700],
                                         ),
                                       ),
                                     ),

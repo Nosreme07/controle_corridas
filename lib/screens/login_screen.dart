@@ -14,13 +14,13 @@ class _LoginScreenState extends State<LoginScreen> {
   // Controladores do LOGIN
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  
+
   // Controladores do CADASTRO (Modal)
   final _signupEmailController = TextEditingController();
   final _signupPasswordController = TextEditingController();
 
   final _auth = FirebaseAuth.instance;
-  
+
   bool _isLoading = false;
   bool _isObscure = true; // Olhinho do Login
 
@@ -53,9 +53,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // --- FUNÇÃO QUE REALIZA O CADASTRO (CHAMADA PELO MODAL) ---
   Future<void> _performRegistration(BuildContext modalContext) async {
-    if (_signupEmailController.text.isEmpty || _signupPasswordController.text.length < 6) {
+    if (_signupEmailController.text.isEmpty ||
+        _signupPasswordController.text.length < 6) {
       ScaffoldMessenger.of(modalContext).showSnackBar(
-        const SnackBar(content: Text("Email inválido ou senha curta (mín. 6).")),
+        const SnackBar(
+          content: Text("Email inválido ou senha curta (mín. 6)."),
+        ),
       );
       return;
     }
@@ -65,27 +68,33 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-        email: _signupEmailController.text.trim(),
-        password: _signupPasswordController.text.trim(),
-      );
+      UserCredential userCredential = await _auth
+          .createUserWithEmailAndPassword(
+            email: _signupEmailController.text.trim(),
+            password: _signupPasswordController.text.trim(),
+          );
 
       await FirebaseFirestore.instance
-          .collection('usuarios') // Coleção antiga, mas ok manter se já tem dados
+          .collection(
+            'usuarios',
+          ) // Coleção antiga, mas ok manter se já tem dados
           .doc(userCredential.user!.uid)
           .set({
             'email': _signupEmailController.text.trim(),
             'data_cadastro': DateTime.now(),
             'saldo_geral': 0.0,
             'nome': 'Novo Motorista',
-            'isPremium': false, 
+            'isPremium': false,
           });
 
       // Salva na coleção 'users' (nova) também para garantir compatibilidade futura
-      await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-          'email': _signupEmailController.text.trim(),
-          'isPremium': false,
-      }, SetOptions(merge: true));
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .set({
+            'email': _signupEmailController.text.trim(),
+            'isPremium': false,
+          }, SetOptions(merge: true));
 
       if (!mounted) return;
 
@@ -94,7 +103,6 @@ class _LoginScreenState extends State<LoginScreen> {
         context,
         MaterialPageRoute(builder: (context) => const HomeScreen()),
       );
-      
     } on FirebaseAuthException catch (e) {
       String message = "Erro ao cadastrar";
       if (e.code == 'email-already-in-use') message = "Este e-mail já existe.";
@@ -119,7 +127,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, 
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -130,7 +138,9 @@ class _LoginScreenState extends State<LoginScreen> {
           builder: (BuildContext context, StateSetter setModalState) {
             return Padding(
               padding: EdgeInsets.only(
-                top: 20, left: 20, right: 20,
+                top: 20,
+                left: 20,
+                right: 20,
                 bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
               ),
               child: Column(
@@ -141,7 +151,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 20),
-                  
+
                   TextField(
                     controller: _signupEmailController,
                     decoration: const InputDecoration(
@@ -161,7 +171,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       border: const OutlineInputBorder(),
                       prefixIcon: const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
-                        icon: Icon(isModalObscure ? Icons.visibility : Icons.visibility_off),
+                        icon: Icon(
+                          isModalObscure
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                        ),
                         onPressed: () {
                           setModalState(() {
                             isModalObscure = !isModalObscure;
@@ -200,19 +214,27 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _resetPassword() async {
     if (_emailController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Digite seu e-mail no campo de login primeiro.")),
+        const SnackBar(
+          content: Text("Digite seu e-mail no campo de login primeiro."),
+        ),
       );
       return;
     }
     try {
       await _auth.sendPasswordResetEmail(email: _emailController.text.trim());
-      if(!mounted) return;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Email de recuperação enviado!"), backgroundColor: Colors.green),
+        const SnackBar(
+          content: Text("Email de recuperação enviado!"),
+          backgroundColor: Colors.green,
+        ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Erro ao enviar email."), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text("Erro ao enviar email."),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -252,17 +274,22 @@ class _LoginScreenState extends State<LoginScreen> {
                   border: const OutlineInputBorder(),
                   prefixIcon: const Icon(Icons.lock),
                   suffixIcon: IconButton(
-                    icon: Icon(_isObscure ? Icons.visibility : Icons.visibility_off),
+                    icon: Icon(
+                      _isObscure ? Icons.visibility : Icons.visibility_off,
+                    ),
                     onPressed: () => setState(() => _isObscure = !_isObscure),
                   ),
                 ),
               ),
-              
+
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: _resetPassword,
-                  child: const Text("Esqueci minha senha", style: TextStyle(color: Colors.grey)),
+                  child: const Text(
+                    "Esqueci minha senha",
+                    style: TextStyle(color: Colors.grey),
+                  ),
                 ),
               ),
 
@@ -288,10 +315,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 15),
-                        
+
                         // BOTÃO QUE ABRE O MODAL
                         TextButton(
-                          onPressed: _openSignUpModal, 
+                          onPressed: _openSignUpModal,
                           child: const Text.rich(
                             TextSpan(
                               text: "Não tem conta? ",
@@ -300,8 +327,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                 TextSpan(
                                   text: "Cadastre-se aqui",
                                   style: TextStyle(
-                                    color: Colors.blue, 
-                                    fontWeight: FontWeight.bold
+                                    color: Colors.blue,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ],
@@ -324,10 +351,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-<<<<<<< HEAD
-hj
-=======
-
-
-
->>>>>>> 0243522a1064b66924ffc112ae0254db8bf078d1

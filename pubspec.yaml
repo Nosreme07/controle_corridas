@@ -26,9 +26,10 @@ dependencies:
   # --- Dependências de Funcionalidades ---
   image_picker: ^1.0.7  # Para tirar foto e pegar da galeria
   url_launcher: ^6.2.5  # Para abrir o link da CNH Digital e WhatsApp
-  flutter_notification_listener: ^1.1.0 # Para ler notificações do sistema
+  flutter_notification_listener: ^1.4.0 # Para ler notificações do sistema
   flutter_local_notifications: ^17.0.0 # <--- ADICIONADO: Para enviar o alerta de resultado
-
+  change_app_package_name: ^1.1.0
+  
 dev_dependencies:
   flutter_test:
     sdk: flutter

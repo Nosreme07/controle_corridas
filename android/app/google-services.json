@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:755741762456:android:69daaf8dd0ffc9856741ed",
+        "android_client_info": {
+          "package_name": "com.domex.financeiro"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBvW3-bviPQxLQxvfLwCJzQdTQvp-fDg-E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:755741762456:android:e0a77990fd0c63156741ed",
         "android_client_info": {
           "package_name": "com.example.controle_99"
